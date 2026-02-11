@@ -1,0 +1,15 @@
+# Virtual environment
+.venv/
+venv/
+__pycache__/
+*.pyc
+
+# macOS metadata
+._*
+.DS_Store
+
+# Logs
+*.log
+
+# Node modules
+node_modules/
