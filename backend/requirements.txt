@@ -3,3 +3,4 @@ uvicorn
 biopython
 pydantic
 requests
+primer3-py

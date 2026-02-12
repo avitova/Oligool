@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import MSAViewer from './components/MSAViewer';
+import QueryViewer from './components/QueryViewer';
 import BlastResults from './components/BlastResults';
 
 type Step = 'input' | 'blasting' | 'aligning' | 'done';
@@ -18,6 +19,7 @@ function App() {
   const [blastHits, setBlastHits] = useState<BlastHit[]>([]);
   const [blastMeta, setBlastMeta] = useState<{ rid: string; rtoe: number; query_len: number } | null>(null);
   const [alignment, setAlignment] = useState('');
+  const [selectedSequence, setSelectedSequence] = useState<{ id: string; seq: string; start: number; end: number } | null>(null);
   const [error, setError] = useState('');
   const [apiKey, setApiKey] = useState(() => localStorage.getItem('ncbi_api_key') || '');
   const [showSettings, setShowSettings] = useState(!localStorage.getItem('ncbi_api_key'));
@@ -26,6 +28,9 @@ function App() {
   const [organism, setOrganism] = useState('');
   const [eValue, setEValue] = useState('0.05');
   const [percIdentity, setPercIdentity] = useState('0');
+
+  const [jobName, setJobName] = useState('Query');
+  const [selectedPrimers, setSelectedPrimers] = useState<{ p1: { start: number, end: number }, p2: { start: number, end: number } } | null>(null);
 
   const maxHits = maxHitsPreset === 'custom'
     ? parseInt(customHits, 10) || 50
@@ -55,6 +60,7 @@ function App() {
     setBlastHits([]);
     setBlastMeta(null);
     setAlignment('');
+    setSelectedSequence(null);
 
     try {
       // Parse: if it's FASTA, extract the sequence; otherwise use raw text
@@ -101,6 +107,7 @@ function App() {
     setBlastHits([]);
     setBlastMeta(null);
     setAlignment('');
+    setSelectedSequence(null);
     setError('');
     setInput('');
   };
@@ -216,10 +223,26 @@ function App() {
         <main>
           {/* Input Area */}
           <div className={`bg-white shadow-sm rounded-xl border border-slate-200 p-6 mb-6 transition-all duration-300 ${step === 'done' ? 'hidden' : 'block'}`}>
+
+            {/* Job Name Input */}
+            <div className="mb-4">
+              <label className="block text-sm font-semibold text-slate-700 mb-1">
+                Job Name
+              </label>
+              <input
+                type="text"
+                value={jobName}
+                onChange={(e) => setJobName(e.target.value)}
+                placeholder="e.g. My Gene Analysis"
+                className="w-full sm:w-1/2 rounded-lg border-slate-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 text-sm px-3 py-2 border"
+              />
+            </div>
+
             <label htmlFor="sequence" className="block text-sm font-semibold text-slate-700 mb-2">
               Query Sequence
               <span className="ml-2 font-normal text-slate-400">(FASTA or raw sequence)</span>
             </label>
+            {/* ... textarea ... */}
             <textarea
               id="sequence"
               rows={8}
@@ -229,6 +252,7 @@ function App() {
               value={input}
               onChange={(e) => setInput(e.target.value)}
             />
+            {/* ... filters ... */}
             <div className="mt-4 grid grid-cols-1 md:grid-cols-3 gap-4 border-t border-slate-100 pt-4">
               {/* Organism Filter */}
               <div>
@@ -271,7 +295,7 @@ function App() {
                 />
               </div>
             </div>
-
+            {/* ... buttons ... */}
             <div className="mt-4 flex items-center justify-between flex-wrap gap-3 pt-2">
               <div className="flex items-center gap-2">
                 <label className="text-xs font-medium text-slate-500">Max hits:</label>
@@ -383,7 +407,7 @@ function App() {
               <div>
                 <h3 className="text-sm font-semibold text-slate-800 flex items-center gap-2">
                   <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
-                  Search Completed
+                  {(jobName && jobName !== 'Query') ? jobName : 'Search Analysis'} Completed
                 </h3>
                 <div className="mt-1 text-xs text-slate-500 font-mono flex flex-wrap gap-x-4 gap-y-1">
                   <span>RID: <span className="text-slate-700">{blastMeta.rid}</span></span>
@@ -413,7 +437,21 @@ function App() {
           {blastHits.length > 0 && <BlastResults hits={blastHits} />}
 
           {/* MSA Viewer */}
-          {alignment && <MSAViewer alignment={alignment} />}
+          {alignment && (
+            <>
+              <MSAViewer
+                alignment={alignment}
+                onVisibleQueryChange={setSelectedSequence}
+                jobName={jobName}
+                primers={selectedPrimers}
+              />
+              <QueryViewer
+                data={selectedSequence}
+                jobName={jobName}
+                onPrimersUpdate={setSelectedPrimers}
+              />
+            </>
+          )}
         </main>
       </div>
     </div>

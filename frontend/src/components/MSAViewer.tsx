@@ -1,15 +1,16 @@
 import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react';
 
-interface MSAViewerProps {
-    alignment: string;
-}
-
-interface ParsedSequence {
+export interface ParsedSequence {
     id: string;
     seq: string;
 }
 
-
+interface MSAViewerProps {
+    alignment: string;
+    onVisibleQueryChange?: (data: { id: string; seq: string; start: number; end: number }) => void;
+    jobName?: string;
+    primers?: { p1: { start: number, end: number }, p2: { start: number, end: number } } | null;
+}
 
 /* ── constants ────────────────────────────────────────── */
 const LABEL_WIDTH = 140;
@@ -23,7 +24,7 @@ const MINIMAP_RULER_H = 14;
 const MINIMAP_HANDLE_H = 8;
 const MINIMAP_HEIGHT = MINIMAP_GC_H + MINIMAP_RULER_H + 50 + MINIMAP_HANDLE_H;
 
-const MSAViewer: React.FC<MSAViewerProps> = ({ alignment }) => {
+const MSAViewer: React.FC<MSAViewerProps> = ({ alignment, onVisibleQueryChange, jobName, primers }) => {
     const canvasRef = useRef<HTMLCanvasElement>(null);
     const minimapRef = useRef<HTMLCanvasElement>(null);
     const scrollRef = useRef<HTMLDivElement>(null);
@@ -72,6 +73,23 @@ const MSAViewer: React.FC<MSAViewerProps> = ({ alignment }) => {
     const endFrac = Math.min(1, startFrac + viewFraction);
     const startCol = Math.max(0, Math.floor(startFrac * seqLen));
     const endCol = Math.min(seqLen - 1, Math.ceil(endFrac * seqLen) - 1);
+
+    /* ── broadcast visible query range ─────────────────── */
+    useEffect(() => {
+        if (sequences.length > 0 && onVisibleQueryChange) {
+            // Provide the visible slice of the query (first sequence)
+            const query = sequences[0];
+            const start = Math.max(0, startCol);
+            const end = Math.min(query.seq.length - 1, endCol);
+            const slice = query.seq.slice(start, end + 1);
+            onVisibleQueryChange({
+                id: query.id,
+                seq: slice,
+                start: start,
+                end: end
+            });
+        }
+    }, [sequences, startCol, endCol, onVisibleQueryChange]);
 
     /* ── auto-switch mode with hysteresis ──────────────── */
     useEffect(() => {
@@ -338,10 +356,28 @@ const MSAViewer: React.FC<MSAViewerProps> = ({ alignment }) => {
             ctx.fillRect(Math.floor(handleX), rowsTop + rowAreaH, handleDrawW, MINIMAP_HANDLE_H - 1);
         }
 
+        // 2.5) Draw Primers (P1=Green, P2=Blue) on Query Row (row 0)
+        if (primers) {
+            const y = rowsTop; // Query is row 0
+            const h = Math.max(1, rowH - 0.5);
+
+            // P1
+            const p1x = LABEL_WIDTH + (primers.p1.start / seqLen) * mmSeqW;
+            const p1w = Math.max(1, ((primers.p1.end - primers.p1.start) / seqLen) * mmSeqW);
+            ctx.fillStyle = '#22c55e'; // Green
+            ctx.fillRect(p1x, y, p1w, h); // Fill
+
+            // P2
+            const p2x = LABEL_WIDTH + (primers.p2.start / seqLen) * mmSeqW;
+            const p2w = Math.max(1, ((primers.p2.end - primers.p2.start) / seqLen) * mmSeqW);
+            ctx.fillStyle = '#3b82f6'; // Blue
+            ctx.fillRect(p2x, y, p2w, h);
+        }
+
         // label divider
         ctx.fillStyle = '#cbd5e1';
         ctx.fillRect(LABEL_WIDTH - 1, 0, 1, MINIMAP_HEIGHT);
-    }, [sequences, querySeq, seqLen, availableWidth, startFrac, endFrac, gcContent, viewFraction, selectionRange]);
+    }, [sequences, querySeq, seqLen, availableWidth, startFrac, endFrac, gcContent, viewFraction, selectionRange, primers]);
 
     useEffect(() => { drawMinimap(); }, [drawMinimap]);
 
@@ -590,6 +626,17 @@ const MSAViewer: React.FC<MSAViewerProps> = ({ alignment }) => {
                         // Match or Query
                         bg = '#f3f4f6';
                         fg = '#374151';
+
+                        // Check for Primers on Query
+                        if (isQuery && primers) {
+                            if (col >= primers.p1.start && col < primers.p1.end) {
+                                bg = '#bbf7d0'; // Green-200
+                                fg = '#14532d'; // Green-900
+                            } else if (col >= primers.p2.start && col < primers.p2.end) {
+                                bg = '#bfdbfe'; // Blue-200
+                                fg = '#1e3a8a'; // Blue-900
+                            }
+                        }
                     }
 
                     ctx.fillStyle = bg;
@@ -630,6 +677,15 @@ const MSAViewer: React.FC<MSAViewerProps> = ({ alignment }) => {
                         // Mismatch vs Query (Red)
                         ctx.fillStyle = '#dc2626';
                         ctx.fillRect(x, y + 2, Math.max(1, cellW), ROW_HEIGHT - 4);
+                    } else if (isQuery && primers && ch !== '-') {
+                        // Highlight Primers on Query
+                        if (col >= primers.p1.start && col < primers.p1.end) {
+                            ctx.fillStyle = '#22c55e'; // Green
+                            ctx.fillRect(x, y + 2, Math.max(1, cellW), ROW_HEIGHT - 4);
+                        } else if (col >= primers.p2.start && col < primers.p2.end) {
+                            ctx.fillStyle = '#3b82f6'; // Blue
+                            ctx.fillRect(x, y + 2, Math.max(1, cellW), ROW_HEIGHT - 4);
+                        }
                     }
                 }
             }
@@ -645,10 +701,13 @@ const MSAViewer: React.FC<MSAViewerProps> = ({ alignment }) => {
             const s = sequences[row];
             const y = RULER_HEIGHT + row * ROW_HEIGHT;
             const isQuery = row === 0;
+
             ctx.fillStyle = isQuery ? '#f0f9ff' : '#ffffff';
             ctx.fillRect(0, y, LABEL_WIDTH - 1, ROW_HEIGHT);
+
             ctx.fillStyle = isQuery ? '#0369a1' : '#475569';
             ctx.font = `${isQuery ? 'bold ' : ''}10px ui-monospace, SFMono-Regular, monospace`;
+
             ctx.textAlign = 'right';
             ctx.textBaseline = 'middle';
             const lbl = s.id.length > 16 ? s.id.substring(0, 15) + '…' : s.id;
@@ -657,7 +716,7 @@ const MSAViewer: React.FC<MSAViewerProps> = ({ alignment }) => {
 
         ctx.fillStyle = '#cbd5e1';
         ctx.fillRect(LABEL_WIDTH - 1, 0, 1, totalH);
-    }, [sequences, querySeq, scrollLeft, cellW, seqAreaW, availableWidth, totalH, seqLen, viewMode]);
+    }, [sequences, querySeq, scrollLeft, cellW, seqAreaW, availableWidth, totalH, seqLen, viewMode, primers]);
 
     useEffect(() => { draw(); }, [draw]);
 
@@ -707,15 +766,23 @@ const MSAViewer: React.FC<MSAViewerProps> = ({ alignment }) => {
     };
 
     /* ── canvas click → copy sequence ─────────────────── */
+    /* ── canvas click → copy sequence OR select ─────────────────── */
     const handleCanvasClick = (e: React.MouseEvent<HTMLCanvasElement>) => {
-        if (viewMode !== 'letters') return;
+        // If we are in letters mode, we might still want to select? 
+        // Actually, user wants "only the query sequence of choice will be displayed".
+        // Let's make click always select the row.
+
         const cvs = canvasRef.current;
         if (!cvs) return;
         const rect = cvs.getBoundingClientRect();
         const y = e.clientY - rect.top;
         const row = Math.floor((y - RULER_HEIGHT) / ROW_HEIGHT);
+
         if (row >= 0 && row < sequences.length) {
-            copySequence(sequences[row]);
+            const seq = sequences[row];
+            if (viewMode === 'letters') {
+                copySequence(seq);
+            }
         }
     };
 
@@ -727,7 +794,7 @@ const MSAViewer: React.FC<MSAViewerProps> = ({ alignment }) => {
             <div className="px-5 py-3 bg-gradient-to-r from-slate-50 to-indigo-50/50 border-b border-slate-200 flex items-center justify-between flex-wrap gap-2">
                 <div className="flex items-center gap-3 flex-wrap">
                     <h2 className="text-lg font-semibold text-slate-800">
-                        Alignment <span className="text-sm font-normal text-slate-500">({sequences.length} seq, {seqLen} bp)</span>
+                        Multiple sequence alignment <span className="text-sm font-normal text-slate-500">({sequences.length} seq, {seqLen} bp)</span>
                     </h2>
                     <div className="flex items-center gap-1.5">
                         <button
